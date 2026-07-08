@@ -1,7 +1,10 @@
 from anyio import Lock
 from fastapi import WebSocket, WebSocketDisconnect
 from pycrdt import Channel
-from pycrdt.websocket import WebsocketServer, exception_logger
+from pycrdt.store import SQLiteYStore, YDocNotFound
+from pycrdt.websocket import WebsocketServer, YRoom, exception_logger
+
+from app.config import settings
 
 
 class FastAPIWebsocket(Channel):
@@ -34,4 +37,35 @@ class FastAPIWebsocket(Channel):
         return bytes(await self._websocket.receive_bytes())
 
 
-websocket_server = WebsocketServer(exception_handler=exception_logger)
+class AppYStore(SQLiteYStore):
+    db_path = str(settings.ystore_path)
+
+
+class PersistentWebsocketServer(WebsocketServer):
+    """Rooms backed by a SQLite YStore. Stored history is replayed into the
+    room's ydoc while the room is still not ready — the room only starts
+    observing (and thus re-persisting) doc updates once ready is set."""
+
+    async def get_room(self, name: str) -> YRoom:
+        if name not in self.rooms:
+            ystore = AppYStore(path=name)
+            room = YRoom(
+                ready=False,
+                ystore=ystore,
+                exception_handler=self.exception_handler,
+                log=self.log,
+            )
+            self.rooms[name] = room
+            await self.start_room(room)
+            await ystore.started.wait()
+            try:
+                await ystore.apply_updates(room.ydoc)
+            except YDocNotFound:
+                pass
+            room.ready = True
+        room = self.rooms[name]
+        await self.start_room(room)
+        return room
+
+
+websocket_server = PersistentWebsocketServer(exception_handler=exception_logger)
