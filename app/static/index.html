@@ -44,6 +44,7 @@
   <script type="module">
     import * as Y from "yjs";
     import { WebsocketProvider } from "y-websocket";
+    import { startActivityTracking } from "./activity.js";
 
     const COLUMNS = [
       { key: "start",   label: "start",     width: "6.5rem" },
@@ -68,6 +69,7 @@
     const rows = doc.getArray("rows");
 
     awareness.setLocalStateField("user", { name: userName, color });
+    startActivityTracking({ docId: room, user: userName });
 
     const statusEl = document.getElementById("status");
     const usersEl = document.getElementById("users");

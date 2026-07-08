@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from pycrdt import Array
 from pydantic import BaseModel
 
+from app.activity import ActivityBatch, StatsResponse, compute_stats, record_events
 from app.collab import FastAPIWebsocket, websocket_server
 from app.db import Document, get_document, init_db, list_documents, register_document
 
@@ -52,6 +53,17 @@ async def export_document(doc_id: str) -> ExportResponse:
     room = await websocket_server.get_room(doc_id)
     rows = room.ydoc.get("rows", type=Array)
     return ExportResponse(doc_id=doc_id, rows=[Row(**r) for r in rows.to_py()])
+
+
+@app.post("/api/activity")
+async def post_activity(batch: ActivityBatch) -> dict:
+    stored = await run_in_threadpool(record_events, batch)
+    return {"stored": stored}
+
+
+@app.get("/api/stats/{doc_id}")
+async def stats(doc_id: str) -> StatsResponse:
+    return await run_in_threadpool(compute_stats, doc_id)
 
 
 @app.websocket("/room/{doc_id}")
