@@ -10,90 +10,91 @@ drives the real UI. Multi-user scenarios = multiple isolated browser contexts
 in one test, so CRDT convergence is verified end-to-end, not just unit-level.
 `pytest` is the gate for every phase.
 
-## Phase 0 — Skeleton & tooling
+## Phase 0 — Skeleton & tooling ✅
 
 Deps (need sign-off before installing; add to `requirements.txt`):
 `fastapi`, `uvicorn[standard]`, `pycrdt`, `pycrdt-websocket`, `sqlmodel`,
 `pydantic-settings`, and dev deps `pytest`, `pytest-asyncio`, `httpx`,
 `playwright`, `pytest-playwright` (+ one-time `playwright install chromium`).
 
-- [ ] repo layout: `app/` (FastAPI package), `app/static/` (frontend),
+- [x] repo layout: `app/` (FastAPI package), `app/static/` (frontend),
       `tests/`
-- [ ] `BaseSettings` config (host/port, db path, ystore path)
-- [ ] FastAPI app serving `StaticFiles` + `/api/health`
-- [ ] pytest runs: one httpx API test, one Playwright test that loads the
+- [x] `BaseSettings` config (host/port, db path, ystore path)
+- [x] FastAPI app serving `StaticFiles` + `/api/health`
+- [x] pytest runs: one httpx API test, one Playwright test that loads the
       static page and screenshots it
 
 **Exit:** `pytest -q` green; screenshot of the served page looks right.
 
-## Phase 1 — Prove the CRDT pipe (the risky bit, do it early)
+## Phase 1 — Prove the CRDT pipe (the risky bit, do it early) ✅
 
-- [ ] mount pycrdt-websocket in FastAPI (`ASGIServer` mount first; FastAPI
+- [x] mount pycrdt-websocket in FastAPI (`ASGIServer` mount first; FastAPI
       websocket-route adapter as fallback) at `ws://…/room/{doc_id}`
-- [ ] minimal static page: `yjs` + `y-websocket` as pinned CDN ES modules,
+- [x] minimal static page: `yjs` + `y-websocket` as pinned CDN ES modules,
       one shared `Y.Map`, a text input bound to it
-- [ ] Playwright test: two browser contexts, type in A, assert it appears in
+- [x] Playwright test: two browser contexts, type in A, assert it appears in
       B (and vice versa, and after concurrent edits)
 
 **Exit:** cross-client convergence test green. If interop fails here, the
 architecture decision gets revisited *before* any UI work.
 
-## Phase 2 — Collaborative spreadsheet + awareness
+## Phase 2 — Collaborative spreadsheet + awareness ✅
 
-- [ ] grid UI over `Y.Array` of row `Y.Map`s (transcription-shaped columns:
+- [x] grid UI over `Y.Array` of row `Y.Map`s (transcription-shaped columns:
       start, end, speaker, text, noise condition)
-- [ ] cell editing, row add/delete
-- [ ] awareness: per-user color + name; other users' selected cells shown as
+- [x] cell editing, row add/delete
+- [x] awareness: per-user color + name; other users' selected cells shown as
       colored outlines with name tags
-- [ ] Playwright tests: concurrent edits to different cells converge; edit to
+- [x] Playwright tests: concurrent edits to different cells converge; edit to
       same cell converges (last-writer is fine); context B sees context A's
       selection highlight (assert on DOM, plus screenshot for eyeballing)
 
 **Exit:** two headless "users" collaborate on the grid in tests; screenshots
 show both cursors.
 
-## Phase 3 — Persistence & export
+## Phase 3 — Persistence & export ✅
 
-- [ ] YStore (built-in SQLite store) wired into the room manager
-- [ ] SQLModel owns app tables (documents/rooms registry); YStore owns the
+- [x] YStore (built-in SQLite store) wired into the room manager
+- [x] SQLModel owns app tables (documents/rooms registry); YStore owns the
       CRDT update log — separate files/concerns
-- [ ] `GET /api/documents`, `POST /api/documents` (create room)
-- [ ] `GET /api/export/{doc_id}` — server-side pycrdt read → pydantic rows →
+- [x] `GET /api/documents` (documents auto-register on first ws connection
+      instead of an explicit `POST /api/documents`)
+- [x] `GET /api/export/{doc_id}` — server-side pycrdt read → pydantic rows →
       JSON (CSV variant optional)
-- [ ] restart test: edit → stop server → start → state intact (Playwright)
+- [x] restart test: edit → stop server → start → state intact (Playwright)
 
 **Exit:** kill-and-restart test green; export returns the grid as clean rows.
 
-## Phase 4 — Activity telemetry
+## Phase 4 — Activity telemetry ✅
 
 Goal: know how long tasks *actively* take, per user per document.
 
-- [ ] client `activity.js`: batches events —
+- [x] client `activity.js`: batches events —
       `visibilitychange` (tab hidden/shown), window `focus`/`blur`,
       input activity ticks (throttled keystroke/mouse), heartbeat while
       visible, `pagehide` flush via `navigator.sendBeacon`
-- [ ] `POST /api/activity` ingesting event batches → SQLModel `activity_event`
+- [x] `POST /api/activity` ingesting event batches → SQLModel `activity_event`
       table (user, doc, event type, client timestamp, server timestamp)
-- [ ] active-time derivation: sessionize events server-side; gap > N seconds
+- [x] active-time derivation: sessionize events server-side; gap > N seconds
       without input = idle; hidden/blurred = inactive. Expose
       `GET /api/stats/{doc_id}` (per-user active seconds, wall-clock, edits)
-- [ ] Playwright test: simulate focus, typing, tab-hide, return → assert
+- [x] Playwright test: simulate focus, typing, tab-hide, return → assert
       derived active time excludes the hidden window
 
 **Exit:** stats endpoint reports plausible active vs. wall-clock time for a
 scripted session.
 
-## Phase 5 — A/B experiment harness
+## Phase 5 — A/B experiment harness ✅
 
 Goal: measure whether an AI feature actually improves productivity.
 
-- [ ] SQLModel tables: `experiment`, `assignment` (user × experiment →
+- [x] SQLModel tables: `experiment`, `assignment` (user × experiment →
       variant, sticky, assigned server-side), optional `exposure` log
-- [ ] client fetches its variants at load; features gated by variant flag
-- [ ] outcome metrics derived from existing data: active seconds per row
+- [x] client fetches its variants at load; features gated by variant flag
+- [x] outcome metrics derived from existing data: active seconds per row
       completed, rows/hour, edit counts — grouped by variant via
       `GET /api/experiments/{id}/results`
-- [ ] a dummy experiment end-to-end (e.g. variant B shows a fake "AI
+- [x] a dummy experiment end-to-end (e.g. variant B shows a fake "AI
       suggestion" button) proving assignment → exposure → metrics pipeline
 
 **Exit:** results endpoint shows per-variant productivity numbers from a

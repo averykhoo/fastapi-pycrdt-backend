@@ -62,6 +62,13 @@
     const userName = params.get("user") ?? `user-${Math.random().toString(36).slice(2, 6)}`;
     const color = PALETTE[[...userName].reduce((h, c) => h + c.charCodeAt(0), 0) % PALETTE.length];
 
+    // resolve experiment variants before the provider exists — a top-level
+    // await after provider creation would miss early status/sync events
+    const variants = await fetch(`/api/assignments/${encodeURIComponent(userName)}`)
+      .then((r) => r.json()).catch(() => ({}));
+    const aiEnabled = variants["ai-suggest"] === "ai";
+    const tracker = startActivityTracking({ docId: room, user: userName });
+
     const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
     const doc = new Y.Doc();
     const provider = new WebsocketProvider(`${wsProto}//${location.host}/room`, room, doc);
@@ -69,7 +76,6 @@
     const rows = doc.getArray("rows");
 
     awareness.setLocalStateField("user", { name: userName, color });
-    startActivityTracking({ docId: room, user: userName });
 
     const statusEl = document.getElementById("status");
     const usersEl = document.getElementById("users");
@@ -104,7 +110,10 @@
       input.value = value ?? "";
       input.dataset.row = rowIndex;
       input.dataset.col = colKey;
-      input.addEventListener("input", () => rows.get(rowIndex).set(colKey, input.value));
+      input.addEventListener("input", () => {
+        rows.get(rowIndex).set(colKey, input.value);
+        tracker.track("edit");
+      });
       input.addEventListener("focus", () =>
         awareness.setLocalStateField("cell", { row: rowIndex, col: colKey }));
       return input;
@@ -131,6 +140,17 @@
         }
         const actions = document.createElement("td");
         actions.className = "actions";
+        if (aiEnabled) {
+          const ai = document.createElement("button");
+          ai.className = "ai-suggest";
+          ai.textContent = "✨";
+          ai.title = "AI suggest";
+          ai.addEventListener("click", () => {
+            ymap.set("text", `AI suggestion for row ${i + 1}`);
+            tracker.track("edit");
+          });
+          actions.appendChild(ai);
+        }
         const del = document.createElement("button");
         del.textContent = "×";
         del.title = "delete row";

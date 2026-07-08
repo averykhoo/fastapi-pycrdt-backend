@@ -51,4 +51,5 @@ export function startActivityTracking({ docId, user }) {
   setInterval(flush, FLUSH_MS);
 
   push("visible");
+  return { track: push, flush };
 }

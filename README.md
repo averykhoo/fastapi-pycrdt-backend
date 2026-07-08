@@ -86,11 +86,11 @@ FastAPI app ──── mounts ──── pycrdt-websocket WebsocketServer/AS
 
 ## Success criteria
 
-- [ ] Two browsers edit the same grid; edits converge with no lost updates
-- [ ] Selections/cursors visible cross-client in distinct colors
-- [ ] Kill and restart the server → document state comes back
-- [ ] `GET /api/export/{doc_id}` returns the grid as JSON rows
-- [ ] Zero Node/npm anywhere in the repo
+- [x] Two browsers edit the same grid; edits converge with no lost updates
+- [x] Selections/cursors visible cross-client in distinct colors
+- [x] Kill and restart the server → document state comes back
+- [x] `GET /api/export/{doc_id}` returns the grid as JSON rows
+- [x] Zero Node/npm anywhere in the repo
 
 ## Open questions / risks to answer while building
 

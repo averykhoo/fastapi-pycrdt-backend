@@ -10,6 +10,15 @@ from pydantic import BaseModel
 from app.activity import ActivityBatch, StatsResponse, compute_stats, record_events
 from app.collab import FastAPIWebsocket, websocket_server
 from app.db import Document, get_document, init_db, list_documents, register_document
+from app.experiments import (
+    Experiment,
+    ExperimentIn,
+    ResultsResponse,
+    create_experiment,
+    experiment_results,
+    get_assignments,
+    list_experiments,
+)
 
 
 @asynccontextmanager
@@ -64,6 +73,29 @@ async def post_activity(batch: ActivityBatch) -> dict:
 @app.get("/api/stats/{doc_id}")
 async def stats(doc_id: str) -> StatsResponse:
     return await run_in_threadpool(compute_stats, doc_id)
+
+
+@app.post("/api/experiments")
+def post_experiment(spec: ExperimentIn) -> Experiment:
+    return create_experiment(spec)
+
+
+@app.get("/api/experiments")
+def experiments() -> list[Experiment]:
+    return list_experiments()
+
+
+@app.get("/api/assignments/{user}")
+def assignments(user: str) -> dict[str, str]:
+    return get_assignments(user)
+
+
+@app.get("/api/experiments/{name}/results")
+def results(name: str) -> ResultsResponse:
+    result = experiment_results(name)
+    if result is None:
+        raise HTTPException(status_code=404, detail="unknown experiment")
+    return result
 
 
 @app.websocket("/room/{doc_id}")
