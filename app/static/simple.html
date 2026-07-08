@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>collab spreadsheet</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "yjs": "https://esm.sh/yjs@13.6.31",
+      "y-websocket": "https://esm.sh/y-websocket@3.0.0?external=yjs"
+    }
+  }
+  </script>
+</head>
+<body>
+  <h1>collab spreadsheet spike</h1>
+  <p>connection: <span id="status">connecting…</span></p>
+  <label>shared text: <input id="shared-text" type="text" size="60"></label>
+
+  <script type="module">
+    import * as Y from "yjs";
+    import { WebsocketProvider } from "y-websocket";
+
+    const room = new URLSearchParams(location.search).get("room") ?? "demo";
+    const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+
+    const doc = new Y.Doc();
+    const provider = new WebsocketProvider(`${wsProto}//${location.host}/room`, room, doc);
+    const shared = doc.getMap("state");
+
+    const statusEl = document.getElementById("status");
+    provider.on("status", ({ status }) => { statusEl.textContent = status; });
+    provider.on("sync", (synced) => { if (synced) statusEl.textContent = "synced"; });
+
+    const input = document.getElementById("shared-text");
+    input.addEventListener("input", () => shared.set("text", input.value));
+    shared.observe(() => {
+      const value = shared.get("text") ?? "";
+      if (input.value !== value) {
+        input.value = value;
+      }
+    });
+
+    window._collab = { doc, provider, shared };
+  </script>
+</body>
+</html>

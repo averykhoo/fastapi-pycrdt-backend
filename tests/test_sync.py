@@ -13,7 +13,7 @@ def _open(browser, url):
 
 
 def test_two_clients_converge(server, browser):
-    url = f"{server.base_url}/?room=phase1"
+    url = f"{server.base_url}/simple.html?room=phase1"
     a = _open(browser, url)
     b = _open(browser, url)
 
@@ -28,7 +28,7 @@ def test_two_clients_converge(server, browser):
 
 
 def test_late_joiner_gets_existing_state(server, browser):
-    url = f"{server.base_url}/?room=phase1-late"
+    url = f"{server.base_url}/simple.html?room=phase1-late"
     a = _open(browser, url)
     a.fill("#shared-text", "written before B joined")
 

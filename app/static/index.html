@@ -12,37 +12,189 @@
     }
   }
   </script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; }
+    h1 { font-size: 1.2rem; }
+    #toolbar { margin-bottom: 0.75rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    #status { font-weight: 600; }
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #bbb; padding: 0; }
+    th { background: #f0f0f0; padding: 4px 8px; font-size: 0.85rem; }
+    th.rownum, td.rownum { background: #f0f0f0; text-align: center; min-width: 2rem; font-size: 0.85rem; }
+    td.cell { position: relative; }
+    td.cell input { border: none; padding: 6px 8px; font: inherit; width: 100%; box-sizing: border-box; outline-offset: -2px; }
+    td.cell input:focus { outline: 2px solid #333; }
+    .chip { position: absolute; top: -0.9em; right: 0; font-size: 0.65rem; color: white;
+            padding: 0 4px; border-radius: 3px; pointer-events: none; z-index: 1; }
+    td.actions button { border: none; background: none; cursor: pointer; color: #999; padding: 4px 8px; }
+  </style>
 </head>
 <body>
-  <h1>collab spreadsheet spike</h1>
-  <p>connection: <span id="status">connecting…</span></p>
-  <label>shared text: <input id="shared-text" type="text" size="60"></label>
+  <h1>collab transcription grid</h1>
+  <div id="toolbar">
+    <span>connection: <span id="status">connecting…</span></span>
+    <span>online: <span id="users"></span></span>
+    <button id="add-row">+ add row</button>
+  </div>
+  <table>
+    <thead><tr id="header-row"><th class="rownum">#</th></tr></thead>
+    <tbody id="grid-body"></tbody>
+  </table>
 
   <script type="module">
     import * as Y from "yjs";
     import { WebsocketProvider } from "y-websocket";
 
-    const room = new URLSearchParams(location.search).get("room") ?? "demo";
-    const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+    const COLUMNS = [
+      { key: "start",   label: "start",     width: "6.5rem" },
+      { key: "end",     label: "end",       width: "6.5rem" },
+      { key: "speaker", label: "speaker",   width: "8rem" },
+      { key: "text",    label: "transcript", width: "24rem" },
+      { key: "noise",   label: "noise",     width: "7rem" },
+    ];
+    const SEED_ROWS = 5;
+    const PALETTE = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+                     "#008080", "#9a6324", "#800000", "#808000", "#000075"];
 
+    const params = new URLSearchParams(location.search);
+    const room = params.get("room") ?? "demo";
+    const userName = params.get("user") ?? `user-${Math.random().toString(36).slice(2, 6)}`;
+    const color = PALETTE[[...userName].reduce((h, c) => h + c.charCodeAt(0), 0) % PALETTE.length];
+
+    const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
     const doc = new Y.Doc();
     const provider = new WebsocketProvider(`${wsProto}//${location.host}/room`, room, doc);
-    const shared = doc.getMap("state");
+    const awareness = provider.awareness;
+    const rows = doc.getArray("rows");
+
+    awareness.setLocalStateField("user", { name: userName, color });
 
     const statusEl = document.getElementById("status");
-    provider.on("status", ({ status }) => { statusEl.textContent = status; });
-    provider.on("sync", (synced) => { if (synced) statusEl.textContent = "synced"; });
+    const usersEl = document.getElementById("users");
+    const headerRow = document.getElementById("header-row");
+    const tbody = document.getElementById("grid-body");
 
-    const input = document.getElementById("shared-text");
-    input.addEventListener("input", () => shared.set("text", input.value));
-    shared.observe(() => {
-      const value = shared.get("text") ?? "";
-      if (input.value !== value) {
-        input.value = value;
+    for (const col of COLUMNS) {
+      const th = document.createElement("th");
+      th.textContent = col.label;
+      th.style.minWidth = col.width;
+      headerRow.appendChild(th);
+    }
+    headerRow.appendChild(document.createElement("th"));
+
+    provider.on("status", ({ status }) => { statusEl.textContent = status; });
+    provider.on("sync", (synced) => {
+      if (!synced) return;
+      statusEl.textContent = "synced";
+      if (rows.length === 0) {
+        doc.transact(() => {
+          for (let i = 0; i < SEED_ROWS; i++) rows.push([newRow()]);
+        });
       }
     });
 
-    window._collab = { doc, provider, shared };
+    function newRow() {
+      return new Y.Map(COLUMNS.map((c) => [c.key, ""]));
+    }
+
+    function cellInput(rowIndex, colKey, value) {
+      const input = document.createElement("input");
+      input.value = value ?? "";
+      input.dataset.row = rowIndex;
+      input.dataset.col = colKey;
+      input.addEventListener("input", () => rows.get(rowIndex).set(colKey, input.value));
+      input.addEventListener("focus", () =>
+        awareness.setLocalStateField("cell", { row: rowIndex, col: colKey }));
+      return input;
+    }
+
+    function rebuild() {
+      const active = document.activeElement;
+      const focused = active?.dataset?.col
+        ? { row: active.dataset.row, col: active.dataset.col, pos: active.selectionStart }
+        : null;
+
+      tbody.innerHTML = "";
+      rows.forEach((ymap, i) => {
+        const tr = document.createElement("tr");
+        const num = document.createElement("td");
+        num.className = "rownum";
+        num.textContent = i + 1;
+        tr.appendChild(num);
+        for (const col of COLUMNS) {
+          const td = document.createElement("td");
+          td.className = "cell";
+          td.appendChild(cellInput(i, col.key, ymap.get(col.key)));
+          tr.appendChild(td);
+        }
+        const actions = document.createElement("td");
+        actions.className = "actions";
+        const del = document.createElement("button");
+        del.textContent = "×";
+        del.title = "delete row";
+        del.addEventListener("click", () => rows.delete(i, 1));
+        actions.appendChild(del);
+        tr.appendChild(actions);
+        tbody.appendChild(tr);
+      });
+
+      if (focused) {
+        const again = tbody.querySelector(
+          `input[data-row="${focused.row}"][data-col="${focused.col}"]`);
+        if (again) {
+          again.focus();
+          again.setSelectionRange(focused.pos, focused.pos);
+        }
+      }
+      renderPresence();
+    }
+
+    rows.observeDeep((events) => {
+      if (events.some((e) => e.target === rows)) {
+        rebuild();
+        return;
+      }
+      for (const e of events) {
+        const rowIndex = e.path[0];
+        for (const key of e.changes.keys.keys()) {
+          const input = tbody.querySelector(`input[data-row="${rowIndex}"][data-col="${key}"]`);
+          const value = e.target.get(key) ?? "";
+          if (input && input.value !== value) input.value = value;
+        }
+      }
+    });
+
+    function renderPresence() {
+      for (const input of tbody.querySelectorAll("input[data-remote-user]")) {
+        input.style.outline = "";
+        delete input.dataset.remoteUser;
+      }
+      for (const chip of tbody.querySelectorAll(".chip")) chip.remove();
+
+      const names = [];
+      for (const [clientId, state] of awareness.getStates()) {
+        if (!state.user) continue;
+        names.push(state.user.name);
+        if (clientId === awareness.clientID || !state.cell) continue;
+        const input = tbody.querySelector(
+          `input[data-row="${state.cell.row}"][data-col="${state.cell.col}"]`);
+        if (!input) continue;
+        input.style.outline = `2px solid ${state.user.color}`;
+        input.dataset.remoteUser = state.user.name;
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = state.user.name;
+        chip.style.background = state.user.color;
+        input.parentElement.appendChild(chip);
+      }
+      usersEl.textContent = names.sort().join(", ");
+    }
+    awareness.on("change", renderPresence);
+
+    document.getElementById("add-row").addEventListener("click", () => rows.push([newRow()]));
+
+    rebuild();
+    window._collab = { doc, provider, rows, awareness };
   </script>
 </body>
 </html>
