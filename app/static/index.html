@@ -17,29 +17,55 @@
     h1 { font-size: 1.2rem; }
     #toolbar { margin-bottom: 0.75rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
     #status { font-weight: 600; }
+    #username { width: 8rem; }
+    #audio-bar { margin-bottom: 0.75rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    #player { height: 2rem; }
+    #hotkeys { color: #666; }
     table { border-collapse: collapse; }
     th, td { border: 1px solid #bbb; padding: 0; }
     th { background: #f0f0f0; padding: 4px 8px; font-size: 0.85rem; }
     th.rownum, td.rownum { background: #f0f0f0; text-align: center; min-width: 2rem; font-size: 0.85rem; }
+    td.rownum { cursor: pointer; }
+    td.rownum:hover { background: #ddd; }
     td.cell { position: relative; }
     td.cell input { border: none; padding: 6px 8px; font: inherit; width: 100%; box-sizing: border-box; outline-offset: -2px; }
     td.cell input:focus { outline: 2px solid #333; }
     .chip { position: absolute; top: -0.9em; right: 0; font-size: 0.65rem; color: white;
             padding: 0 4px; border-radius: 3px; pointer-events: none; z-index: 1; }
     td.actions button { border: none; background: none; cursor: pointer; color: #999; padding: 4px 8px; }
+    #lobby ul { line-height: 1.8; }
   </style>
 </head>
 <body>
   <h1>collab transcription grid</h1>
-  <div id="toolbar">
-    <span>connection: <span id="status">connecting…</span></span>
-    <span>online: <span id="users"></span></span>
-    <button id="add-row">+ add row</button>
+
+  <div id="lobby" hidden>
+    <h2>documents</h2>
+    <ul id="doc-list"></ul>
+    <form id="new-doc">
+      <input id="new-doc-name" placeholder="new document id" required pattern="[A-Za-z0-9._-]+">
+      <button type="submit">open</button>
+    </form>
   </div>
-  <table>
-    <thead><tr id="header-row"><th class="rownum">#</th></tr></thead>
-    <tbody id="grid-body"></tbody>
-  </table>
+
+  <div id="app" hidden>
+    <div id="toolbar">
+      <span>connection: <span id="status">connecting…</span></span>
+      <span>online: <span id="users"></span></span>
+      <label>name: <input id="username" title="your annotator name"></label>
+      <button id="add-row">+ add row</button>
+    </div>
+    <div id="audio-bar">
+      <audio id="player" controls hidden></audio>
+      <label>audio: <input id="audio-upload" type="file" accept="audio/*"></label>
+      <small id="hotkeys">Enter: next row · Alt+S/E: stamp start/end · Alt+P: play/pause ·
+        Alt+G: go to row start · click row #: seek</small>
+    </div>
+    <table>
+      <thead><tr id="header-row"><th class="rownum">#</th></tr></thead>
+      <tbody id="grid-body"></tbody>
+    </table>
+  </div>
 
   <script type="module">
     import * as Y from "yjs";
@@ -47,176 +73,292 @@
     import { startActivityTracking } from "./activity.js";
 
     const COLUMNS = [
-      { key: "start",   label: "start",     width: "6.5rem" },
-      { key: "end",     label: "end",       width: "6.5rem" },
-      { key: "speaker", label: "speaker",   width: "8rem" },
+      { key: "start",   label: "start",      width: "6.5rem" },
+      { key: "end",     label: "end",        width: "6.5rem" },
+      { key: "speaker", label: "speaker",    width: "8rem" },
       { key: "text",    label: "transcript", width: "24rem" },
-      { key: "noise",   label: "noise",     width: "7rem" },
+      { key: "noise",   label: "noise",      width: "7rem" },
     ];
     const SEED_ROWS = 5;
     const PALETTE = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
                      "#008080", "#9a6324", "#800000", "#808000", "#000075"];
+    const colorFor = (name) =>
+      PALETTE[[...name].reduce((h, c) => h + c.charCodeAt(0), 0) % PALETTE.length];
 
     const params = new URLSearchParams(location.search);
-    const room = params.get("room") ?? "demo";
-    const userName = params.get("user") ?? `user-${Math.random().toString(36).slice(2, 6)}`;
-    const color = PALETTE[[...userName].reduce((h, c) => h + c.charCodeAt(0), 0) % PALETTE.length];
-
-    // resolve experiment variants before the provider exists — a top-level
-    // await after provider creation would miss early status/sync events
-    const variants = await fetch(`/api/assignments/${encodeURIComponent(userName)}`)
-      .then((r) => r.json()).catch(() => ({}));
-    const aiEnabled = variants["ai-suggest"] === "ai";
-    const tracker = startActivityTracking({ docId: room, user: userName });
-
-    const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
-    const doc = new Y.Doc();
-    const provider = new WebsocketProvider(`${wsProto}//${location.host}/room`, room, doc);
-    const awareness = provider.awareness;
-    const rows = doc.getArray("rows");
-
-    awareness.setLocalStateField("user", { name: userName, color });
-
-    const statusEl = document.getElementById("status");
-    const usersEl = document.getElementById("users");
-    const headerRow = document.getElementById("header-row");
-    const tbody = document.getElementById("grid-body");
-
-    for (const col of COLUMNS) {
-      const th = document.createElement("th");
-      th.textContent = col.label;
-      th.style.minWidth = col.width;
-      headerRow.appendChild(th);
+    const room = params.get("room");
+    if (room === null) {
+      await lobby();
+    } else {
+      await main(room);
     }
-    headerRow.appendChild(document.createElement("th"));
 
-    provider.on("status", ({ status }) => { statusEl.textContent = status; });
-    provider.on("sync", (synced) => {
-      if (!synced) return;
-      statusEl.textContent = "synced";
-      if (rows.length === 0) {
-        doc.transact(() => {
-          for (let i = 0; i < SEED_ROWS; i++) rows.push([newRow()]);
-        });
+    async function lobby() {
+      document.getElementById("lobby").hidden = false;
+      const open = (docId) => {
+        location.href = `/?room=${encodeURIComponent(docId)}`;
+      };
+      const docs = await fetch("/api/documents").then((r) => r.json()).catch(() => []);
+      const list = document.getElementById("doc-list");
+      for (const doc of docs) {
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = `/?room=${encodeURIComponent(doc.doc_id)}`;
+        a.textContent = doc.doc_id;
+        li.appendChild(a);
+        list.appendChild(li);
       }
-    });
-
-    function newRow() {
-      return new Y.Map(COLUMNS.map((c) => [c.key, ""]));
-    }
-
-    function cellInput(rowIndex, colKey, value) {
-      const input = document.createElement("input");
-      input.value = value ?? "";
-      input.dataset.row = rowIndex;
-      input.dataset.col = colKey;
-      input.addEventListener("input", () => {
-        rows.get(rowIndex).set(colKey, input.value);
-        tracker.track("edit");
+      document.getElementById("new-doc").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const name = document.getElementById("new-doc-name").value.trim();
+        if (name) open(name);
       });
-      input.addEventListener("focus", () =>
-        awareness.setLocalStateField("cell", { row: rowIndex, col: colKey }));
-      return input;
     }
 
-    function rebuild() {
-      const active = document.activeElement;
-      const focused = active?.dataset?.col
-        ? { row: active.dataset.row, col: active.dataset.col, pos: active.selectionStart }
-        : null;
+    async function main(room) {
+      document.getElementById("app").hidden = false;
 
-      tbody.innerHTML = "";
-      rows.forEach((ymap, i) => {
-        const tr = document.createElement("tr");
-        const num = document.createElement("td");
-        num.className = "rownum";
-        num.textContent = i + 1;
-        tr.appendChild(num);
-        for (const col of COLUMNS) {
-          const td = document.createElement("td");
-          td.className = "cell";
-          td.appendChild(cellInput(i, col.key, ymap.get(col.key)));
-          tr.appendChild(td);
-        }
-        const actions = document.createElement("td");
-        actions.className = "actions";
-        if (aiEnabled) {
-          const ai = document.createElement("button");
-          ai.className = "ai-suggest";
-          ai.textContent = "✨";
-          ai.title = "AI suggest";
-          ai.addEventListener("click", () => {
-            ymap.set("text", `AI suggestion for row ${i + 1}`);
-            tracker.track("edit");
+      const userName = params.get("user")
+        ?? localStorage.getItem("annotator-name")
+        ?? `user-${Math.random().toString(36).slice(2, 6)}`;
+
+      // resolve experiment variants before the provider exists — a top-level
+      // await after provider creation would miss early status/sync events
+      const variants = await fetch(`/api/assignments/${encodeURIComponent(userName)}`)
+        .then((r) => r.json()).catch(() => ({}));
+      const aiEnabled = variants["ai-suggest"] === "ai";
+      const tracker = startActivityTracking({ docId: room, user: userName });
+
+      const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+      const doc = new Y.Doc();
+      const provider = new WebsocketProvider(`${wsProto}//${location.host}/room`, room, doc);
+      const awareness = provider.awareness;
+      const rows = doc.getArray("rows");
+
+      awareness.setLocalStateField("user", { name: userName, color: colorFor(userName) });
+
+      const statusEl = document.getElementById("status");
+      const usersEl = document.getElementById("users");
+      const headerRow = document.getElementById("header-row");
+      const tbody = document.getElementById("grid-body");
+      const audio = document.getElementById("player");
+
+      const nameInput = document.getElementById("username");
+      nameInput.value = userName;
+      nameInput.addEventListener("change", () => {
+        const name = nameInput.value.trim() || userName;
+        localStorage.setItem("annotator-name", name);
+        awareness.setLocalStateField("user", { name, color: colorFor(name) });
+      });
+
+      for (const col of COLUMNS) {
+        const th = document.createElement("th");
+        th.textContent = col.label;
+        th.style.minWidth = col.width;
+        headerRow.appendChild(th);
+      }
+      headerRow.appendChild(document.createElement("th"));
+
+      provider.on("status", ({ status }) => { statusEl.textContent = status; });
+      provider.on("sync", (synced) => {
+        if (!synced) return;
+        statusEl.textContent = "synced";
+        if (rows.length === 0) {
+          doc.transact(() => {
+            for (let i = 0; i < SEED_ROWS; i++) rows.push([newRow()]);
           });
-          actions.appendChild(ai);
         }
-        const del = document.createElement("button");
-        del.textContent = "×";
-        del.title = "delete row";
-        del.addEventListener("click", () => rows.delete(i, 1));
-        actions.appendChild(del);
-        tr.appendChild(actions);
-        tbody.appendChild(tr);
       });
 
-      if (focused) {
-        const again = tbody.querySelector(
-          `input[data-row="${focused.row}"][data-col="${focused.col}"]`);
-        if (again) {
-          again.focus();
-          again.setSelectionRange(focused.pos, focused.pos);
+      function newRow() {
+        return new Y.Map(COLUMNS.map((c) => [c.key, ""]));
+      }
+
+      // --- audio ---------------------------------------------------------
+      const audioUrl = `/api/audio/${encodeURIComponent(room)}`;
+      async function initAudio() {
+        const head = await fetch(audioUrl, { method: "HEAD" }).catch(() => null);
+        if (head?.ok) {
+          audio.src = audioUrl;
+          audio.hidden = false;
         }
       }
-      renderPresence();
-    }
+      await initAudio();
+      document.getElementById("audio-upload").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append("file", file);
+        await fetch(audioUrl, { method: "POST", body: form });
+        await initAudio();
+      });
 
-    rows.observeDeep((events) => {
-      if (events.some((e) => e.target === rows)) {
-        rebuild();
-        return;
+      const pad = (n, w) => String(n).padStart(w, "0");
+      function fmtTime(seconds) {
+        const ms = Math.round(seconds * 1000);
+        return `${pad(Math.floor(ms / 3600000), 2)}:${pad(Math.floor(ms / 60000) % 60, 2)}:` +
+               `${pad(Math.floor(ms / 1000) % 60, 2)}.${pad(ms % 1000, 3)}`;
       }
-      for (const e of events) {
-        const rowIndex = e.path[0];
-        for (const key of e.changes.keys.keys()) {
-          const input = tbody.querySelector(`input[data-row="${rowIndex}"][data-col="${key}"]`);
-          const value = e.target.get(key) ?? "";
-          if (input && input.value !== value) input.value = value;
+      function parseTime(text) {
+        const m = text.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)$/);
+        if (!m) return null;
+        return (+(m[1] ?? 0)) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
+      }
+      function seekToRow(ymap) {
+        const t = parseTime(ymap.get("start") ?? "");
+        if (t !== null && audio.src) audio.currentTime = t;
+      }
+
+      // --- keyboard ------------------------------------------------------
+      document.addEventListener("keydown", (e) => {
+        const active = document.activeElement;
+        const inCell = active?.dataset?.col !== undefined;
+
+        if (e.key === "Enter" && inCell) {
+          e.preventDefault();
+          const row = +active.dataset.row;
+          if (row + 1 >= rows.length) rows.push([newRow()]);
+          tbody.querySelector(`input[data-row="${row + 1}"][data-col="${active.dataset.col}"]`)
+            ?.focus();
+          return;
         }
-      }
-    });
+        if (!e.altKey) return;
+        const key = e.key.toLowerCase();
+        const rowIndex = inCell ? +active.dataset.row : null;
+        if (key === "p") {
+          e.preventDefault();
+          if (audio.paused) audio.play().catch(() => {});
+          else audio.pause();
+        } else if (key === "s" && rowIndex !== null) {
+          e.preventDefault();
+          rows.get(rowIndex).set("start", fmtTime(audio.currentTime));
+          tracker.track("edit");
+        } else if (key === "e" && rowIndex !== null) {
+          e.preventDefault();
+          rows.get(rowIndex).set("end", fmtTime(audio.currentTime));
+          tracker.track("edit");
+        } else if (key === "g" && rowIndex !== null) {
+          e.preventDefault();
+          seekToRow(rows.get(rowIndex));
+        }
+      });
 
-    function renderPresence() {
-      for (const input of tbody.querySelectorAll("input[data-remote-user]")) {
-        input.style.outline = "";
-        delete input.dataset.remoteUser;
+      // --- grid ----------------------------------------------------------
+      function cellInput(rowIndex, colKey, value) {
+        const input = document.createElement("input");
+        input.value = value ?? "";
+        input.dataset.row = rowIndex;
+        input.dataset.col = colKey;
+        input.addEventListener("input", () => {
+          rows.get(rowIndex).set(colKey, input.value);
+          tracker.track("edit");
+        });
+        input.addEventListener("focus", () =>
+          awareness.setLocalStateField("cell", { row: rowIndex, col: colKey }));
+        return input;
       }
-      for (const chip of tbody.querySelectorAll(".chip")) chip.remove();
 
-      const names = [];
-      for (const [clientId, state] of awareness.getStates()) {
-        if (!state.user) continue;
-        names.push(state.user.name);
-        if (clientId === awareness.clientID || !state.cell) continue;
-        const input = tbody.querySelector(
-          `input[data-row="${state.cell.row}"][data-col="${state.cell.col}"]`);
-        if (!input) continue;
-        input.style.outline = `2px solid ${state.user.color}`;
-        input.dataset.remoteUser = state.user.name;
-        const chip = document.createElement("span");
-        chip.className = "chip";
-        chip.textContent = state.user.name;
-        chip.style.background = state.user.color;
-        input.parentElement.appendChild(chip);
+      function rebuild() {
+        const active = document.activeElement;
+        const focused = active?.dataset?.col
+          ? { row: active.dataset.row, col: active.dataset.col, pos: active.selectionStart }
+          : null;
+
+        tbody.innerHTML = "";
+        rows.forEach((ymap, i) => {
+          const tr = document.createElement("tr");
+          const num = document.createElement("td");
+          num.className = "rownum";
+          num.textContent = i + 1;
+          num.title = "seek audio to this row's start";
+          num.addEventListener("click", () => seekToRow(ymap));
+          tr.appendChild(num);
+          for (const col of COLUMNS) {
+            const td = document.createElement("td");
+            td.className = "cell";
+            td.appendChild(cellInput(i, col.key, ymap.get(col.key)));
+            tr.appendChild(td);
+          }
+          const actions = document.createElement("td");
+          actions.className = "actions";
+          if (aiEnabled) {
+            const ai = document.createElement("button");
+            ai.className = "ai-suggest";
+            ai.textContent = "✨";
+            ai.title = "AI suggest";
+            ai.addEventListener("click", () => {
+              ymap.set("text", `AI suggestion for row ${i + 1}`);
+              tracker.track("edit");
+            });
+            actions.appendChild(ai);
+          }
+          const del = document.createElement("button");
+          del.textContent = "×";
+          del.title = "delete row";
+          del.addEventListener("click", () => rows.delete(i, 1));
+          actions.appendChild(del);
+          tr.appendChild(actions);
+          tbody.appendChild(tr);
+        });
+
+        if (focused) {
+          const again = tbody.querySelector(
+            `input[data-row="${focused.row}"][data-col="${focused.col}"]`);
+          if (again) {
+            again.focus();
+            again.setSelectionRange(focused.pos, focused.pos);
+          }
+        }
+        renderPresence();
       }
-      usersEl.textContent = names.sort().join(", ");
+
+      rows.observeDeep((events) => {
+        if (events.some((e) => e.target === rows)) {
+          rebuild();
+          return;
+        }
+        for (const e of events) {
+          const rowIndex = e.path[0];
+          for (const key of e.changes.keys.keys()) {
+            const input = tbody.querySelector(`input[data-row="${rowIndex}"][data-col="${key}"]`);
+            const value = e.target.get(key) ?? "";
+            if (input && input.value !== value) input.value = value;
+          }
+        }
+      });
+
+      function renderPresence() {
+        for (const input of tbody.querySelectorAll("input[data-remote-user]")) {
+          input.style.outline = "";
+          delete input.dataset.remoteUser;
+        }
+        for (const chip of tbody.querySelectorAll(".chip")) chip.remove();
+
+        const names = [];
+        for (const [clientId, state] of awareness.getStates()) {
+          if (!state.user) continue;
+          names.push(state.user.name);
+          if (clientId === awareness.clientID || !state.cell) continue;
+          const input = tbody.querySelector(
+            `input[data-row="${state.cell.row}"][data-col="${state.cell.col}"]`);
+          if (!input) continue;
+          input.style.outline = `2px solid ${state.user.color}`;
+          input.dataset.remoteUser = state.user.name;
+          const chip = document.createElement("span");
+          chip.className = "chip";
+          chip.textContent = state.user.name;
+          chip.style.background = state.user.color;
+          input.parentElement.appendChild(chip);
+        }
+        usersEl.textContent = names.sort().join(", ");
+      }
+      awareness.on("change", renderPresence);
+
+      document.getElementById("add-row").addEventListener("click", () => rows.push([newRow()]));
+
+      rebuild();
+      window._collab = { doc, provider, rows, awareness };
     }
-    awareness.on("change", renderPresence);
-
-    document.getElementById("add-row").addEventListener("click", () => rows.push([newRow()]));
-
-    rebuild();
-    window._collab = { doc, provider, rows, awareness };
   </script>
 </body>
 </html>

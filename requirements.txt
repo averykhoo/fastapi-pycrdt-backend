@@ -4,3 +4,4 @@ pycrdt
 pycrdt-websocket
 sqlmodel
 pydantic-settings
+python-multipart

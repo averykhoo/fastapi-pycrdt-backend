@@ -1,4 +1,5 @@
 """Phase 3: persistence across restarts, document registry, JSON export."""
+import json
 import time
 
 import httpx
@@ -35,6 +36,25 @@ def test_export_returns_structured_rows(server, browser):
         "text": "first utterance", "noise": "",
     }
     assert data["rows"][1]["text"] == "second utterance"
+
+
+def test_export_csv_and_jsonl_skip_empty_rows(server, browser):
+    a = _open(browser, server, "exp2", "alice")
+    _cell(a, 0, "text").fill("hello")
+    _cell(a, 0, "speaker").fill("S1")
+    _wait_export(server, "exp2", lambda rows: rows[0]["text"] == "hello")
+
+    r = httpx.get(f"{server.base_url}/api/export/exp2?format=csv")
+    lines = r.text.strip().splitlines()
+    assert lines[0] == "row,start,end,speaker,text,noise"
+    assert lines[1:] == ["0,,,S1,hello,"]  # the 4 untouched rows are skipped
+
+    r = httpx.get(f"{server.base_url}/api/export/exp2?format=jsonl")
+    objects = [json.loads(line) for line in r.text.strip().splitlines()]
+    assert objects == [{
+        "doc_id": "exp2", "row": 0,
+        "start": "", "end": "", "speaker": "S1", "text": "hello", "noise": "",
+    }]
 
 
 def test_documents_registry(server, browser):
