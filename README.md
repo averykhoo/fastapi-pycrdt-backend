@@ -9,7 +9,36 @@ frontend with a **pure-Python backend** (no npm/Node server) — FastAPI +
 [pycrdt-websocket](https://github.com/y-crdt/pycrdt-websocket).
 
 This repo exists to prove that architecture works before the hackathon, using
-a small Excel-like test app.
+a small Excel-like test app. **Status: all phases built and tested** — the
+spike graduated into a working annotation tool (audio playback, timestamp
+hotkeys, lobby, activity telemetry, A/B harness, training-data export).
+
+## Running it
+
+```sh
+# once: install into the project's conda env
+python -m pip install -r requirements-dev.txt
+python -m playwright install chromium   # only needed for the test suite
+
+# run the server
+python -m uvicorn app.main:app --port 8000
+```
+
+Open http://localhost:8000/ — the lobby lists documents and creates new ones.
+Inside a document: upload an audio file, then transcribe. Hotkeys:
+**Enter** next row (grows the grid on the last row) · **Alt+S / Alt+E** stamp
+the player's current time into start/end of the focused row · **Alt+P**
+play/pause · **Alt+G** seek to the focused row's start · **click a row
+number** to seek there. Your annotator name persists in the browser;
+`?user=NAME` in the URL overrides it.
+
+APIs: `/api/documents`, `/api/export/{doc}?format=json|csv|jsonl` (csv/jsonl
+skip empty rows), `/api/audio/{doc}` (POST multipart, GET), `/api/stats/{doc}`
+(active vs open seconds per user), `/api/experiments` +
+`/api/experiments/{name}/results`, `/api/assignments/{user}`.
+
+Tests: `python -m pytest -q` (needs internet — the frontend loads yjs from a
+CDN). 25 tests drive real headless-Chromium multi-user sessions.
 
 ## Why a spreadsheet as the test app
 

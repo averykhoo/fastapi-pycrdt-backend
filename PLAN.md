@@ -100,20 +100,23 @@ Goal: measure whether an AI feature actually improves productivity.
 **Exit:** results endpoint shows per-variant productivity numbers from a
 scripted two-user session.
 
-## Phase 6 — Hackathon build (the real tool)
+## Phase 6 — Hackathon build (the real tool) ✅ (core)
 
-Not built in this repo's spike; listed so phases 0–5 stay honest about what
-they must support.
-
-- audio: per-document audio file upload + `<audio>` player, row ⇄ playback
-  linking (click row → seek to start timestamp; hotkey to stamp current time
-  into start/end cells)
-- keyboard-first annotation flow (tab/enter navigation, speaker quick-picks)
-- lightweight identity (name + color picker, persisted; no real auth)
-- AI features to A/B: ASR pre-fill of rows, text autocomplete, speaker
-  suggestion — each behind an experiment flag from phase 5
-- export pipeline to the actual training-data format
-- deployment story (single uvicorn box is fine)
+- [x] audio: per-document upload + `<audio>` player, row ⇄ playback linking
+      (row-number click / Alt+G seek; Alt+S / Alt+E stamp current time into
+      start/end cells; Alt+P play/pause)
+- [x] keyboard-first annotation flow (Enter advances a row and grows the grid
+      on the last row; tab navigation is native)
+- [x] lightweight identity (annotator name persisted in localStorage, color
+      derived from name; no real auth)
+- [x] lobby page at `/` — list, open, create documents
+- [x] export pipeline: `?format=csv|jsonl` training-data formats (empty rows
+      skipped)
+- [x] deployment story: single uvicorn box, documented in README
+- [ ] real AI features to A/B (ASR pre-fill, autocomplete, speaker
+      suggestion) — the harness + a fake suggest feature exist behind the
+      `ai-suggest` flag; swap in a real model during hackathon week
+- [ ] speaker quick-picks / per-cell validation — polish, as needed
 
 ## Standing rules
 
