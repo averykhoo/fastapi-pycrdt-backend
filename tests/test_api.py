@@ -1,3 +1,4 @@
+"""Phase 0: basic HTTP plumbing — health check and static file serving."""
 import httpx
 
 

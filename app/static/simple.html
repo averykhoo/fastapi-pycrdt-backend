@@ -19,6 +19,10 @@
   <label>shared text: <input id="shared-text" type="text" size="60"></label>
 
   <script type="module">
+    // Minimal Phase-1 regression page: one shared Y.Map with a single text
+    // field, kept deliberately independent of the full grid (index.html) so
+    // tests/test_sync.py verifies the raw FastAPI <-> pycrdt <-> y-websocket
+    // sync pipe without depending on grid-specific markup.
     import * as Y from "yjs";
     import { WebsocketProvider } from "y-websocket";
 

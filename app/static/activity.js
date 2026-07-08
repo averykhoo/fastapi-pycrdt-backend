@@ -1,10 +1,24 @@
 // Active-time telemetry: batches interaction/visibility events to the server
 // so it can derive how long a user was *actively* working vs. merely present.
+// Server-side interpretation of the event stream lives in app/activity.py.
 
 const HEARTBEAT_MS = 2000;      // proves the page is open and visible
 const INPUT_THROTTLE_MS = 500;  // at most one "input" tick per interval
 const FLUSH_MS = 1000;
 
+/**
+ * Start reporting this page's activity to POST /api/activity.
+ *
+ * Registers listeners for input (keyboard/pointer/wheel, throttled),
+ * visibility/focus/blur, and page unload, plus a heartbeat while visible.
+ * Events are queued client-side and flushed periodically (or immediately,
+ * via sendBeacon, on pagehide so the final events aren't lost to navigation).
+ *
+ * @param {{docId: string, user: string}} params
+ * @returns {{track: (type: string) => void, flush: () => void}}
+ *   `track` queues a custom event (e.g. "edit") under the same batching
+ *   policy as the built-in listeners; `flush` sends the queue immediately.
+ */
 export function startActivityTracking({ docId, user }) {
   let queue = [];
   let lastInput = 0;
@@ -23,6 +37,8 @@ export function startActivityTracking({ docId, user }) {
     }).catch(() => {});
   };
 
+  // throttled so a burst of keystrokes/mouse movement is one "input" tick
+  // per INPUT_THROTTLE_MS, not one event per keystroke
   for (const evt of ["keydown", "pointerdown", "pointermove", "wheel"]) {
     window.addEventListener(evt, () => {
       const now = Date.now();
@@ -38,6 +54,8 @@ export function startActivityTracking({ docId, user }) {
   window.addEventListener("focus", () => push("focus"));
   window.addEventListener("blur", () => push("blur"));
 
+  // pagehide fires reliably on tab close/navigation, unlike beforeunload;
+  // sendBeacon queues the request even though the page is being torn down
   window.addEventListener("pagehide", () => {
     push("unload");
     const body = JSON.stringify({ doc_id: docId, user, events: queue });
@@ -45,6 +63,8 @@ export function startActivityTracking({ docId, user }) {
     navigator.sendBeacon("/api/activity", new Blob([body], { type: "application/json" }));
   });
 
+  // heartbeats stop once the tab is hidden, which is how the server tells
+  // "open but idle" apart from "closed/backgrounded" (see OPEN_GAP_S)
   setInterval(() => {
     if (document.visibilityState === "visible") push("heartbeat");
   }, HEARTBEAT_MS);

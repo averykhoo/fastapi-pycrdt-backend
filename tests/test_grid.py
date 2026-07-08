@@ -1,10 +1,22 @@
-"""Phase 2: collaborative spreadsheet with awareness (cursors/selections)."""
-from playwright.sync_api import expect
+"""Phase 2: collaborative spreadsheet with awareness (cursors/selections).
 
-from tests.conftest import ARTIFACTS
+`_open` and `_cell` are also imported by test_activity.py, test_audio.py,
+test_experiments.py, test_keyboard.py, test_lobby.py, and test_persistence.py
+as the standard way to open a grid page / locate a cell input.
+"""
+from playwright.sync_api import Browser, Locator, Page, expect
+
+from tests.conftest import ARTIFACTS, Server
 
 
-def _open(browser, server, room, user):
+def _open(browser: Browser, server: Server, room: str, user: str) -> Page:
+    """Open the grid page for `room` as `user` in a fresh browser context
+    (so each simulated "user" has isolated cookies/localStorage), and wait
+    for the initial Yjs sync and the 5 seeded rows to render.
+
+    Returns:
+        The Playwright `Page`, ready for interaction.
+    """
     context = browser.new_context()
     page = context.new_page()
     page.goto(f"{server.base_url}/?room={room}&user={user}")
@@ -13,7 +25,8 @@ def _open(browser, server, room, user):
     return page
 
 
-def _cell(page, row, col):
+def _cell(page: Page, row: int, col: str) -> Locator:
+    """Locate the `<input>` for a given grid row/column on `page`."""
     return page.locator(f'input[data-row="{row}"][data-col="{col}"]')
 
 

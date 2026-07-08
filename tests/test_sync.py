@@ -1,10 +1,16 @@
-"""Phase 1: two real browsers must converge through the FastAPI/pycrdt pipe."""
-from playwright.sync_api import expect
+"""Phase 1: two real browsers must converge through the FastAPI/pycrdt pipe.
+
+Uses the minimal `simple.html` page (a single shared `Y.Map` text field)
+rather than the full grid — this is a regression test for the raw sync pipe
+independent of the grid UI built on top of it in later phases.
+"""
+from playwright.sync_api import Browser, Page, expect
 
 from tests.conftest import ARTIFACTS
 
 
-def _open(browser, url):
+def _open(browser: Browser, url: str) -> Page:
+    """Open `url` in a fresh browser context and wait for it to sync."""
     context = browser.new_context()
     page = context.new_page()
     page.goto(url)

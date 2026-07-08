@@ -68,10 +68,17 @@
   </div>
 
   <script type="module">
+    // Collaborative transcription grid: a Y.Array of row Y.Maps synced over
+    // the /room/{doc_id} websocket (see app/collab.py). This one file drives
+    // both the lobby (no ?room=) and the grid (?room=<id>) views; there is
+    // no build step — yjs/y-websocket are loaded as pinned ES modules via
+    // the <script type="importmap"> above.
     import * as Y from "yjs";
     import { WebsocketProvider } from "y-websocket";
     import { startActivityTracking } from "./activity.js";
 
+    // Grid schema — one Y.Map per row with exactly these keys. Mirrors the
+    // server-side Row model in app/main.py (Row/ExportResponse).
     const COLUMNS = [
       { key: "start",   label: "start",      width: "6.5rem" },
       { key: "end",     label: "end",        width: "6.5rem" },
@@ -82,6 +89,9 @@
     const SEED_ROWS = 5;
     const PALETTE = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
                      "#008080", "#9a6324", "#800000", "#808000", "#000075"];
+
+    /** Deterministic per-name color so the same annotator always gets the
+     * same awareness color across sessions/reloads. */
     const colorFor = (name) =>
       PALETTE[[...name].reduce((h, c) => h + c.charCodeAt(0), 0) % PALETTE.length];
 
@@ -93,6 +103,8 @@
       await main(room);
     }
 
+    /** Render the document list / "open or create a room" view (`/` with no
+     * `?room=`). Fetches the registry from GET /api/documents. */
     async function lobby() {
       document.getElementById("lobby").hidden = false;
       const open = (docId) => {
@@ -115,6 +127,12 @@
       });
     }
 
+    /** Render and run the collaborative grid for `room`: connects the Yjs
+     * websocket provider, wires up the audio player, hotkeys, cell editing,
+     * and awareness presence, and starts activity tracking.
+     *
+     * @param {string} room - the document/room id from `?room=`
+     */
     async function main(room) {
       document.getElementById("app").hidden = false;
 
@@ -170,12 +188,17 @@
         }
       });
 
+      /** Create a fresh, empty row (a Y.Map with every column key present
+       * so cellInput's `ymap.get(col.key)` reads never hit undefined). */
       function newRow() {
         return new Y.Map(COLUMNS.map((c) => [c.key, ""]));
       }
 
       // --- audio ---------------------------------------------------------
       const audioUrl = `/api/audio/${encodeURIComponent(room)}`;
+
+      /** Show the <audio> player if this room has an uploaded file (probed
+       * via HEAD so a 404 doesn't show a broken player), else keep it hidden. */
       async function initAudio() {
         const head = await fetch(audioUrl, { method: "HEAD" }).catch(() => null);
         if (head?.ok) {
@@ -194,22 +217,35 @@
       });
 
       const pad = (n, w) => String(n).padStart(w, "0");
+
+      /** Format a player time (seconds, possibly fractional) as the grid's
+       * canonical timestamp string `HH:MM:SS.mmm`. */
       function fmtTime(seconds) {
         const ms = Math.round(seconds * 1000);
         return `${pad(Math.floor(ms / 3600000), 2)}:${pad(Math.floor(ms / 60000) % 60, 2)}:` +
                `${pad(Math.floor(ms / 1000) % 60, 2)}.${pad(ms % 1000, 3)}`;
       }
+
+      /** Parse a `[H:]M:S[.frac]` timestamp string into seconds, or `null`
+       * if it doesn't match — used to make row-seek tolerant of partially
+       * typed/hand-edited timestamps rather than only ones fmtTime wrote. */
       function parseTime(text) {
         const m = text.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)$/);
         if (!m) return null;
         return (+(m[1] ?? 0)) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
       }
+
+      /** Seek the audio player to a row's `start` timestamp, if it has a
+       * parseable one and audio is loaded. No-op otherwise. */
       function seekToRow(ymap) {
         const t = parseTime(ymap.get("start") ?? "");
         if (t !== null && audio.src) audio.currentTime = t;
       }
 
-      // --- keyboard ------------------------------------------------------
+      // --- keyboard --------------------------------------------------------
+      // Enter: move to the next row in the same column (growing the grid at
+      // the last row). Alt+S/E/P/G: stamp start/end, play/pause, seek — see
+      // the #hotkeys line in the toolbar for the user-facing summary.
       document.addEventListener("keydown", (e) => {
         const active = document.activeElement;
         const inCell = active?.dataset?.col !== undefined;
@@ -243,7 +279,10 @@
         }
       });
 
-      // --- grid ----------------------------------------------------------
+      // --- grid ------------------------------------------------------------
+
+      /** Build one cell's <input>, wired to write through to the shared Yjs
+       * row on every keystroke and to publish awareness on focus. */
       function cellInput(rowIndex, colKey, value) {
         const input = document.createElement("input");
         input.value = value ?? "";
@@ -258,6 +297,12 @@
         return input;
       }
 
+      /** Fully re-render the table body from the current `rows` state.
+       * Called on any structural change (row add/delete, initial sync) —
+       * cheap enough at hackathon-grid sizes, and simpler than patching the
+       * DOM incrementally. Preserves focus/caret position across the
+       * rebuild so a remote insert/delete doesn't kick the local user out
+       * of the cell they're typing in. */
       function rebuild() {
         const active = document.activeElement;
         const focused = active?.dataset?.col
@@ -312,6 +357,9 @@
         renderPresence();
       }
 
+      // Structural changes (row add/delete) trigger a full rebuild; a plain
+      // cell-value change patches just that <input> so an in-progress local
+      // edit in another cell isn't disturbed by a remote per-keystroke update.
       rows.observeDeep((events) => {
         if (events.some((e) => e.target === rows)) {
           rebuild();
@@ -327,6 +375,10 @@
         }
       });
 
+      /** Re-render awareness state: outline+chip on cells other users have
+       * focused, and the "online: ..." name list. Called on every awareness
+       * change (including our own), so it always reflects the latest
+       * snapshot rather than diffing against the previous render. */
       function renderPresence() {
         for (const input of tbody.querySelectorAll("input[data-remote-user]")) {
           input.style.outline = "";

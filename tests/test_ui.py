@@ -1,3 +1,4 @@
+"""Phase 0: the static frontend actually loads in a real browser."""
 from tests.conftest import ARTIFACTS
 
 
