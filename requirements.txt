@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pycrdt
+pycrdt-websocket
+sqlmodel
+pydantic-settings
